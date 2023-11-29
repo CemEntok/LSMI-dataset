@@ -29,6 +29,7 @@ class Solver():
         self.beta1              = config.beta1
         self.beta2              = config.beta2
         self.criterion          = nn.MSELoss(reduction='mean')
+        # self.criterion          = custom_loss
         self.num_epochs_decay   = config.num_epochs_decay
         self.save_epoch         = config.save_epoch
         self.multi_gpu          = config.multi_gpu
@@ -132,16 +133,18 @@ class Solver():
         best_psnr = 0.
         best_25worst = 9876543210.
         best_25best  = 9876543210
-        train_loss = 0.0
+        
+        
         # Training
         # with profiler.profile(use_cuda=True) as prof:
         for epoch in range(self.num_epochs):
-            
+
                 self.net.train()
                 # print("Model Size (MB):", sum(p.numel() for p in self.net.parameters()) * 4 / (1024**2))
                 trainbatch_len = len(self.train_loader)
                 MAE_list = [] # Uce
-
+                train_loss = 0.0
+                TVLossTrain = 0.0
                 for i, batch in enumerate(self.train_loader):
                     # prepare input
                     if self.input_type == "rgb":
@@ -163,8 +166,13 @@ class Solver():
                     # print("Input Size:", inputs.size())
                     pred = self.net(inputs) # [20,2,256,256]
                     pred_detach = pred.detach()#.cpu() [20,2,256,256]
-                    pred_loss = self.criterion(pred*masks, GTs*masks)
-                    breakpoint()
+                    TVLossTrain +=(total_variation_loss(pred*masks)).item()
+                    pred_loss = self.criterion(pred*masks, GTs*masks) + total_variation_loss(pred*masks)
+                    
+                    # # tv_loss = total_variation_loss(pred*masks)
+                    # breakpoint()
+                    # pred_loss = pred_loss + tv_loss
+                    
                     # linear colorline loss
                     if self.output_type == "illumination":
                         illum_map_rb = None
@@ -228,7 +236,7 @@ class Solver():
                     # print training log & write on tensorboard & reset vriables
                     print(f'[Train] Epoch [{epoch+1}/{self.num_epochs}] | ' \
                             f'Batch [{i+1}/{trainbatch_len}] | ' \
-                            f'train_loss_avg:{train_loss/(i+1):.5f} | ' \
+                            f'train_lossTotal:{train_loss:.5f} | ' \
                             f'pred_loss:{pred_loss.item():.5f} | ' \
                             f'MAE_illum:{MAE_illum.item():.5f} | '\
                             f'MAE_rgb:{MAE_rgb.item():.5f} | '\
@@ -241,9 +249,10 @@ class Solver():
 
                 current_memory = torch.cuda.memory_allocated()
                 print(f"[Train]\tEpoch {epoch+1}, Batch {i}, GPU Memory Allocated: {current_memory / 1024**3:.2f} GB")
-                breakpoint()
+                # breakpoint()
                 # Print or log the average loss for the epoch
                 average_loss = train_loss / len(self.train_loader)
+                TVLossTrainAvg = TVLossTrain / len(self.train_loader)
                 print(f"Epoch {epoch + 1}, Average Loss: {average_loss:.4f}")
 
                 # lr decay
@@ -259,6 +268,7 @@ class Solver():
                     x1 = "a"
                 with open(os.path.join(self.model_path,"TrainLosses.txt"), x1) as text_file:
                     print(f"AverageTrainLoss:{average_loss}_epoch:{epoch+1}", file=text_file)
+                    print(f"AverageTVLossTrain:{TVLossTrainAvg}_epoch:{epoch+1}", file=text_file)
                     print(f"MAE_illum:{MAE_illum}_epoch:{epoch+1}", file=text_file)
                     print(f"MAE_rgb:{MAE_rgb}_epoch:{epoch+1}", file=text_file)
 
@@ -279,6 +289,7 @@ class Solver():
                 MAE_illumValList = []
                 MAE_illumValB25 = [] # uce
                 MAE_illumValW25 = [] # uce
+                TVLossValid = 0
                 # total_loss = 0
 
                 for i, batch in enumerate(self.valid_loader):
@@ -299,7 +310,8 @@ class Solver():
                     pred = self.net(inputs)
                     # print("######### [Validation]\tStart validation process. PATLAMA YOK  IKI !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
                     pred_detach = pred.detach()
-                    pred_loss = self.criterion(pred, GTs)
+                    TVLossValid +=(total_variation_loss(pred)).item()
+                    pred_loss = self.criterion(pred, GTs) + total_variation_loss(pred)
 
                     # linear colorline loss
                     if self.output_type == "illumination":
@@ -348,6 +360,7 @@ class Solver():
 
                 # breakpoint()
                 valid_loss /= len(self.valid_loader)
+                TVLossValidAvg = TVLossValid / len(self.valid_loader)
                 valid_pred_loss /= valid_data_count
                 valid_MAE_illum /= valid_data_count
                 valid_MAE_rgb /= valid_data_count
@@ -359,6 +372,7 @@ class Solver():
                     x1 = "a"
                 with open(os.path.join(self.model_path,"valLosses.txt"), x1) as text_file:
                     print(f"AverageValidPredLoss:{valid_loss}_epoch:{epoch+1}", file=text_file)
+                    print(f"AverageValidTVLoss:{TVLossValidAvg}_epoch:{epoch+1}", file=text_file)
                     print(f"Valid_MAE_illum:{valid_MAE_illum}_epoch:{epoch+1}", file=text_file)
                     print(f"valid_MAE_rgb:{valid_MAE_rgb}_epoch:{epoch+1}", file=text_file)
 
@@ -456,7 +470,7 @@ class Solver():
         test_data_count = 0
         test_MAE_illum_worst25 = []
         test_MAE_illum_best25 = [] 
-
+        TVLossTest = 0
         for i, batch in enumerate(self.test_loader):
             # prepare input,GT,mask
             if self.input_type == "rgb":
@@ -472,7 +486,8 @@ class Solver():
             # inference
             pred = self.net(inputs)
             pred_detach = pred.detach()
-            pred_loss = self.criterion(pred, GTs)
+            TVLossTest +=(total_variation_loss(pred)).item()
+            pred_loss = self.criterion(pred, GTs) + total_variation_loss(pred)
 
             # linear colorline loss
             if self.output_type == "illumination":
@@ -489,15 +504,30 @@ class Solver():
             input_rgb = batch["input_rgb"].to(self.device)
             gt_illum = batch["gt_illum"].to(self.device)
             gt_rgb = batch["gt_rgb"].to(self.device)
+            ones = torch.ones_like(gt_illum[:,:1,:,:])
+            gt_illum = torch.cat([gt_illum[:,:1,:,:],ones,gt_illum[:,1:,:,:]],dim=1)
             if self.output_type == "illumination":
                 ones = torch.ones_like(pred_detach[:,:1,:,:])
                 pred_illum = torch.cat([pred_detach[:,:1,:,:],ones,pred_detach[:,1:,:,:]],dim=1)
                 pred_rgb = apply_wb(input_rgb,pred_illum,pred_type='illumination')
+                gt_rgbv2 = apply_wb(batch["input_rgb"].to(self.device),gt_illum,pred_type='illumination')
+                gt_rgbv2 = gt_rgbv2.cpu()
             elif self.output_type == "uv":
                 pred_rgb = apply_wb(input_rgb,pred_detach,pred_type='uv')
                 pred_illum = input_rgb / (pred_rgb + 1e-8)
-            ones = torch.ones_like(gt_illum[:,:1,:,:])
-            gt_illum = torch.cat([gt_illum[:,:1,:,:],ones,gt_illum[:,1:,:,:]],dim=1)
+
+            predRGB_uc  =  pred_rgb[0].cpu()
+            gtRGB_uc    =  batch["gt_rgb"][0]
+            inputRGB_uc =  batch["input_rgb"][0]
+
+            # healthCheck(predRGB_uc)
+            # # healthCheck(gtRGB_uc)
+            # healthCheck(inputRGB_uc)
+
+            predRGB_uc  =  torch.clamp(predRGB_uc,0,self.white_level)
+            gtRGB_uc    =  torch.clamp(gtRGB_uc,0,self.white_level)
+            inputRGB_uc =  torch.clamp(inputRGB_uc,0,self.white_level)
+
             pred_rgb = torch.clamp(pred_rgb,0,self.white_level)
 
             # input(pred_illum.shape)
@@ -516,10 +546,10 @@ class Solver():
             #         f'best25MAE:{best25.item():.5f} | ')
             #     # breakpoint()
             # Uce
-
+            TVLossTestAvg = TVLossTest / len(self.test_loader)
             print(f'[Test] Batch [{i+1}/{len(self.test_loader)}] | ' \
-                        f'test_loss_avg:{test_loss/(i+1):.5f} | ' \
-                        f'pred_loss:{pred_loss.item():.5f} | ' \
+                        f'test_loss_avg:{test_loss/len(self.test_loader):.5f} | ' \
+                        f'TVLossTestAvg:{TVLossTestAvg.item():.5f} | ' \
                         f'MAE_illum:{MAE_illum.item():.5f} | '\
                         f'MAE_rgb:{MAE_rgb.item():.5f} | '\
                         f'worst25MAE:{worst25.item():.5f} | '\
@@ -527,6 +557,8 @@ class Solver():
                         f'PSNR:{PSNR.item():.5f}')
             test_data_count += len(inputs)
             # breakpoint()
+            
+            print(f'[Test] TVLossAverage: {TVLossTestAvg:.5f}')
             test_loss_list.append(test_loss)
             test_pred_loss.append(pred_loss.item())
             test_MAE_illum.append(MAE_illum.item())
@@ -543,14 +575,29 @@ class Solver():
                 plot_fig,plot_fig_rev = plot_illum(pred_map=illum_map_rb.permute(0,2,3,1).reshape((-1,2)).cpu().detach().numpy(),
                                  gt_map=gt_illum[:,[0,2],:,:].permute(0,2,3,1).reshape((-1,2)).cpu().detach().numpy(),
                                  MAE_illum=MAE_illum,MAE_rgb=MAE_rgb,PSNR=PSNR)
+                # UNDER UV OUTPUT
+                    # illum_map_rb is 1x2x256x256
+                    # abc = illum_map_rb.permute(0,2,3,1).reshape((-1,2))
+                    # (Pdb) abc.shape
+                    # torch.Size([65536, 2]                                                                                                        )
                     # # breakpoint()
-                # input_srgb, output_srgb, gt_srgb = visualize(batch['input_rgb'][0],pred_rgb[0],batch['gt_rgb'][0],self.camera,concat=False)
+
                 if self.jarno != "oneImage":
                     input_srgb, output_srgb, gt_srgb, input_rgb, output_rgb, gt_rgb = visualize(batch['input_rgb'][0],pred_rgb[0],batch['gt_rgb'][0],self.camera,concat=False)
+                    if self.output_type == "illumination":
+                        input_srgbv2, output_srgbv2, gt_srgbv2, _, _, _ = visualize(inputRGB_uc,predRGB_uc,gtRGB_uc,self.camera,concat=False)
                 else:
                     input_srgb, output_srgb, gt_srgb, input_rgb, output_rgb, gt_rgb = visualize(batch['input_rgb'][0],pred_rgb[0],batch['gt_rgb'][0],"jarno",concat=False)
                 
                 fname_base = batch["place"][0]+'_'+batch["illum_count"][0]
+                
+                if self.output_type == "illumination":
+                    np.save(os.path.join(self.result_path,fname_base+"_IN"+"_ILLUM.npy"), batch['input_rgb'][0].numpy())
+                    np.save(os.path.join(self.result_path,fname_base+"_GT"+"_ILLUM.npy"), batch['gt_rgb'][0].numpy())
+                elif self.output_type == "uv":
+                    np.save(os.path.join(self.result_path,fname_base+"_IN"+"_U_V.npy"), batch['input_rgb'][0].numpy())
+                    np.save(os.path.join(self.result_path,fname_base+"_GT"+"_U_V.npy"), batch['gt_rgb'][0].numpy())
+                # breakpoint()
                 if self.jarno=="oneImage":
                     # breakpoint()
                     Image.fromarray(input_rgb).save(os.path.join(self.result_path,fname_base+'_JARNO_input_rgb.png'))
@@ -572,7 +619,32 @@ class Solver():
                     Image.fromarray(input_srgb).save(os.path.join(self.result_path,fname_base+'_input_srgb.png'))
                     Image.fromarray(output_srgb).save(os.path.join(self.result_path,fname_base+'_output_srgb.png'))
                     Image.fromarray(gt_srgb).save(os.path.join(self.result_path,fname_base+'_gt_srgb.png'))
-                # breakpoint()
+                    # gt_rgb8 = (gt_rgb / np.max(gt_rgb) * 255).astype(np.uint8)
+                    # Image.fromarray(gt_rgb8).save(os.path.join(self.result_path,fname_base+'_gt_RGB.png'))
+                    # Image.fromarray(gt_srgbv2).save(os.path.join(self.result_path,fname_base+'_gt_sRGBv2.png'))
+                    # Image.fromarray(input_srgbv2).save(os.path.join(self.result_path,fname_base+'_input_srgb_VERSION2.png'))
+                    # # Image.fromarray(output_srgbv2).save(os.path.join(self.result_path,fname_base+'_output_srgb_VERSION2.png'))
+                    # Image.fromarray(gt_srgbv2).save(os.path.join(self.result_path,fname_base+'_gt_srgb_VERSION2..png'))
+                    # SRGB built in
+                    
+                    # predRGB_uc  =  pred_rgb[0].cpu()
+                    # # gtRGB_uc    =  batch["gt_rgb"][0]
+                    # # # inputRGB_uc =  batch["input_rgb"][0]
+
+                    # ground_truth_array = (gtRGB_uc * 255 / float(torch.max(gtRGB_uc))).clamp(0, 255).byte().cpu().numpy()
+                    # input_array = (inputRGB_uc * 255 / 1023).clamp(0, 255).byte().cpu().numpy()
+                    # predicted_array = (predRGB_uc * 255 / 1023).clamp(0, 255).byte().cpu().numpy()
+
+                    # # Create Pillow Images from the NumPy arrays
+                    # ground_truth_image = Image.fromarray(ground_truth_array.transpose(1, 2, 0))
+                    # input_image = Image.fromarray(input_array.transpose(1, 2, 0))
+                    # predicted_image = Image.fromarray(predicted_array.transpose(1, 2, 0))
+
+                    # predicted_image.save(os.path.join(self.result_path,fname_base+'_PRED_sRGB_UC.png'), format="PNG")
+                    # input_image.save(os.path.join(self.result_path,fname_base+'_IN_sRGB_UC.png'), format="PNG")
+                    # ground_truth_image.save(os.path.join(self.result_path,fname_base+'_GT_sRGB_UC.png'), format="PNG")
+                    # breakpoint()
+                breakpoint()
                 pred_illum_scale = pred_illum
                 pred_illum_scale[:,1] *= 0.6
                 save_image(fp=os.path.join(self.result_path,fname_base+'_illum.png'),tensor=pred_illum_scale[0].cpu().detach())

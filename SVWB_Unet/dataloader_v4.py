@@ -127,6 +127,7 @@ class LSMI(data.Dataset):
         input_path = os.path.join(self.root,self.split,img_file)
         input_bgr = cv2.imread(input_path, cv2.IMREAD_UNCHANGED).astype('float32')
         input_rgb = cv2.cvtColor(input_bgr, cv2.COLOR_BGR2RGB)
+        # breakpoint()
         if len(illum_count) >1:
             mixmap = np.load(os.path.join(self.root,self.split,mixmap_file)).astype('float32')
             # breakpoint()
@@ -144,6 +145,7 @@ class LSMI(data.Dataset):
             mixmapMeanOverPixel = np.mean(mixmap, axis=(0, 1), keepdims=True)
             self.mixmapNoisyDict[keyMixmap] = mixmapNewMeanOverPixel
             self.mixmapDict[keyMixmap] = mixmapMeanOverPixel
+            mixmap = mixmapNew
             # print(f"[NOISE]\tSAVING THE NOISY DATA")
             # if os.path.isdir(os.path.join(self.model_root,"NoiseData")) == False:
             #     os.makedirs(os.path.join(self.model_root,"NoiseData"))
@@ -151,7 +153,7 @@ class LSMI(data.Dataset):
 
 
             # breakpoint()
-        mixmap = mixmapNew
+        
         # mixmap contains -1 for ZERO_MASK, which means uncalculable pixels with LSMI's G channel approximation.
         # So we must replace negative values to 0 if we use pixel level augmentation.
         uncalculable_masked_mixmap = np.where(mixmap==self.uncalculable,0.0,mixmap) # mixmap = [alpha, 1-alpha]
@@ -185,26 +187,35 @@ class LSMI(data.Dataset):
         ret_dict["input_uvl"] = rgb2uvl(input_rgb)
         
         # prepare output tensor
-        illum_map = mix_chroma(uncalculable_masked_mixmap,ret_dict["illum_chroma"],illum_count) # l_ab = alpha*l_a+(1-alpha)*l_b, (256,256,3), [R/G, 1, B/G]
+
+        illum_map = mix_chroma(uncalculable_masked_mixmap,ret_dict["illum_chroma"],illum_count)
         ret_dict["gt_illum"] = np.delete(illum_map, 1, axis=2)
-        if self.output_type == 'illumination':
-            # pass  
-            illum_map = torch.from_numpy(illum_map.reshape(illum_map.shape[-1],illum_map.shape[0], illum_map.shape[1]))
-            illum_map = illum_map.unsqueeze(0)
-            # illum_map = np.expand_dims(illum_map, axis=0)  # Shape: (1, 3)         
-            ones = torch.ones_like(illum_map[:,:1,:,:])
-            gt_illumCalc = torch.cat([illum_map[:,:1,:,:],ones,illum_map[:,1:,:,:]],dim=1)
-            output_rgb = apply_wb(torch.from_numpy(input_rgb.reshape(input_rgb.shape[-1],input_rgb.shape[0], input_rgb.shape[1])).unsqueeze(0),gt_illumCalc,pred_type='illumination')
-            abc = output_rgb.squeeze()
-            numpy_array = abc.numpy().copy()
-            output_rgb = numpy_array.reshape(numpy_array.shape[1],numpy_array.shape[2], numpy_array.shape[0])
-            # ret_dict["gt_rgb"] = output_rgb
-        elif self.output_type == 'uv':
-            output_bgr = cv2.imread(os.path.join(self.root,self.split,fname+"_gt.tiff"), cv2.IMREAD_UNCHANGED).astype('float32')
-            output_rgb = cv2.cvtColor(output_bgr, cv2.COLOR_BGR2RGB)
-        ret_dict["gt_rgb"] = output_rgb # 256,256,3, numpy ndarray
-        output_uvl = rgb2uvl(output_rgb) # 
+        output_bgr = cv2.imread(os.path.join(self.root,self.split,fname+"_gt.tiff"), cv2.IMREAD_UNCHANGED).astype('float32')
+        output_rgb = cv2.cvtColor(output_bgr, cv2.COLOR_BGR2RGB)
+        ret_dict["gt_rgb"] = output_rgb
+        output_uvl = rgb2uvl(output_rgb)
         ret_dict["gt_uv"] = np.delete(output_uvl, 2, axis=2)
+
+        # illum_map = mix_chroma(uncalculable_masked_mixmap,ret_dict["illum_chroma"],illum_count) # l_ab = alpha*l_a+(1-alpha)*l_b, (256,256,3), [R/G, 1, B/G]
+        # ret_dict["gt_illum"] = np.delete(illum_map, 1, axis=2)
+        # if self.output_type == 'illumination':
+        #     # pass  
+        #     illum_map = torch.from_numpy(illum_map.reshape(illum_map.shape[-1],illum_map.shape[0], illum_map.shape[1]))
+        #     illum_map = illum_map.unsqueeze(0)
+        #     # illum_map = np.expand_dims(illum_map, axis=0)  # Shape: (1, 3)         
+        #     ones = torch.ones_like(illum_map[:,:1,:,:])
+        #     gt_illumCalc = torch.cat([illum_map[:,:1,:,:],ones,illum_map[:,1:,:,:]],dim=1)
+        #     output_rgb = apply_wb(torch.from_numpy(input_rgb.reshape(input_rgb.shape[-1],input_rgb.shape[0], input_rgb.shape[1])).unsqueeze(0),gt_illumCalc,pred_type='illumination')
+        #     abc = output_rgb.squeeze()
+        #     numpy_array = abc.numpy().copy()
+        #     output_rgb = numpy_array.reshape(numpy_array.shape[1],numpy_array.shape[2], numpy_array.shape[0])
+        #     # ret_dict["gt_rgb"] = output_rgb
+        # elif self.output_type == 'uv':
+        #     output_bgr = cv2.imread(os.path.join(self.root,self.split,fname+"_gt.tiff"), cv2.IMREAD_UNCHANGED).astype('float32')
+        #     output_rgb = cv2.cvtColor(output_bgr, cv2.COLOR_BGR2RGB)
+        # ret_dict["gt_rgb"] = output_rgb # 256,256,3, numpy ndarray
+        # output_uvl = rgb2uvl(output_rgb) # 
+        # ret_dict["gt_uv"] = np.delete(output_uvl, 2, axis=2)
 
         # 3. prepare mask
         if self.split == 'train':

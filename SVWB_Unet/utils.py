@@ -1,6 +1,7 @@
 import torch,rawpy
 import numpy as np
 import matplotlib.pyplot as plt
+from torch import nn
 
 def apply_wb(org_img,pred,pred_type):
     """
@@ -286,3 +287,77 @@ def insertNoise(alpha):
     # print(stacked_matrices)
     # print(noisy_parameter)
     return stacked_matrices
+
+def healthCheck(image):
+    """
+    Check if there is any negative value in image.
+    """
+    # if np.any(image < 0):
+    #     print("Negative value detected!")
+    #     return False
+    # else:
+    #     pass
+    try:
+        minVal = np.min(image)
+        maxVal = np.max(image)
+        stdVal = np.std(image)
+        meanVal = np.mean(image)
+    except:
+        print("It is not Numpy array.")
+        minVal = image.min()
+        maxVal = image.max()
+        stdVal = image.std()
+        meanVal = image.mean()
+
+    # print those
+    print("minVal: ", minVal)
+    print("maxVal: ", maxVal)
+    print("stdVal: ", stdVal)
+    print("meanVal: ", meanVal)
+
+    # return the type, shape, is_cuda of image
+    print("type: ", image.dtype)
+    print("shape: ", image.shape)
+    print("is_cuda: ", image.is_cuda)
+
+def total_variation_loss(image):
+    """
+    Calculate the Total Variation (TV) loss for a 2D image.
+
+    Parameters:
+    - image: 2D NumPy array representing the image.
+
+    Returns:
+    - tv_loss: Total Variation loss value.
+    """
+    # breakpoint()
+    # calculate the shape of the image
+    height,width =image.shape[2],image.shape[3]
+
+    # Calculate differences along the x and y directions
+
+    diff_x = image[:, :, 1:, :] - image[:, :, :-1, :]
+    diff_y = image[:, :, :, 1:] - image[:, :, :, :-1]
+
+    # Sum of absolute differences
+    # tv_loss = np.sum(np.abs(diff_x)) + np.sum(np.abs(diff_y))
+    tv_loss = torch.sum(torch.abs(diff_x)) + torch.sum(torch.abs(diff_y))
+
+    # Calculate the normalization factor
+    normalization_factor_spatial = height*width
+    normalization_factor_intensity = torch.max(image) - torch.min(image) + 1e-8
+
+    # Normalize the TV loss
+    normalized_tv_loss = tv_loss / (normalization_factor_spatial * normalization_factor_intensity)
+
+    return normalized_tv_loss
+
+# def custom_loss(input,output, target):
+#     # Implement your custom loss calculation here
+#     # lossMSE = torch.mean((output - target)**2)  # This is just a placeholder, replace it with your actual custom loss
+#     breakpoint()
+#     lossMSE = nn.MSELoss(output,target,reduction='mean')
+#     lossTV = total_variation_loss(input)
+#     loss = lossMSE + lossTV
+#     breakpoint()
+#     return loss

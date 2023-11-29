@@ -64,7 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--mask_black', type=int, default=None)
     parser.add_argument('--mask_highlight', type=int, default=None)
     parser.add_argument('--mask_uncalculable', type=int, default=None) # None for no mask
-    parser.add_argument('--num_workers', type=int, default=0) #default 10, 0 for debugging
+    parser.add_argument('--num_workers', type=int, default=10) #default 10, 0 for debugging
 
     # data augmentation config
     parser.add_argument('--random_crop', type=str, default='yes', choices=['yes','no'])
@@ -89,9 +89,9 @@ if __name__ == '__main__':
     parser.add_argument('--vis_step', type=int, default=10)
     parser.add_argument('--val_step', type=int, default=1)
     parser.add_argument('--change_log', type=str)
-    parser.add_argument('--gpunumber', type=int,default=0,choices=[0,1,2],
+    parser.add_argument('--gpunumber', type=int,default=0,choices=[0,1,2,3],
                         help='which gpu will be used in single case') # 0
-    parser.add_argument('--noisyGT', type=int,default=1,choices=[0,1]) # noisy GT ON/OFF
+    parser.add_argument('--noisyGT', type=int,default=0,choices=[0,1]) # noisy GT ON/OFF
 
     config = parser.parse_args()
     main(config)
